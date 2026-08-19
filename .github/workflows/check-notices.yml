@@ -1,0 +1,42 @@
+name: 공지 확인
+
+# 서버 없이 GitHub Actions만으로 돌리고 싶을 때 쓰는 워크플로.
+# 저장소 Settings > Secrets and variables > Actions 에
+# TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID 를 등록해야 동작한다.
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # 30분마다 (UTC 기준, GitHub 사정에 따라 지연될 수 있음)
+  workflow_dispatch:          # 수동 실행
+
+concurrency:
+  group: check-notices
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # 이미 알린 글 목록을 실행 사이에 유지한다.
+      # 캐시 키는 매 실행마다 새로 만들고, restore-keys 로 직전 것을 가져온다.
+      - name: 이전 상태 복원
+        uses: actions/cache@v4
+        with:
+          path: state.json
+          key: notice-state-${{ github.run_id }}
+          restore-keys: |
+            notice-state-
+
+      - name: 새 공지 확인
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m inha_notice_bot once --env-file "" -v

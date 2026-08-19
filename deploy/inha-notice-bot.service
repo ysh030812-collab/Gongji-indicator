@@ -1,0 +1,16 @@
+[Unit]
+Description=인하대 의과대학 공지 텔레그램 알림 봇
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/inha-notice-bot
+EnvironmentFile=/opt/inha-notice-bot/.env
+ExecStart=/opt/inha-notice-bot/.venv/bin/python -m inha_notice_bot watch
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "inha-notice-bot"
+version = "1.0.0"
+description = "인하대 의과대학 공지사항에 새 글이 올라오면 텔레그램으로 알려주는 봇"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "requests>=2.31",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+inha-notice-bot = "inha_notice_bot.cli:main"
+
+[tool.setuptools]
+packages = ["inha_notice_bot"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
