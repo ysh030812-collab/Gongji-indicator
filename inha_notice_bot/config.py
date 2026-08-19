@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -64,6 +65,16 @@ def load_dotenv(path: str | os.PathLike[str] = ".env") -> None:
             os.environ[key] = value
 
 
+def _strip_all_whitespace(value: str) -> str:
+    """값 안팎의 모든 공백을 없앤다.
+
+    봇 토큰과 채팅 ID에는 공백이 들어갈 수 없다. 그런데 BotFather 메시지에서
+    복사하다 보면 콜론 뒤에 공백이 섞여 들어오는 일이 잦고, 그대로 두면
+    텔레그램이 404를 돌려줘 원인을 알아채기 어렵다. 아예 걷어낸다.
+    """
+    return re.sub(r"\s+", "", value or "")
+
+
 def _env_int(name: str, default: int) -> int:
     raw = os.environ.get(name, "").strip()
     if not raw:
@@ -86,8 +97,8 @@ def load_config(env_file: str | os.PathLike[str] | None = ".env") -> Config:
     if env_file:
         load_dotenv(env_file)
     return Config(
-        bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", "").strip(),
-        chat_id=os.environ.get("TELEGRAM_CHAT_ID", "").strip(),
+        bot_token=_strip_all_whitespace(os.environ.get("TELEGRAM_BOT_TOKEN", "")),
+        chat_id=_strip_all_whitespace(os.environ.get("TELEGRAM_CHAT_ID", "")),
         board_url=os.environ.get("BOARD_URL", DEFAULT_BOARD_URL).strip() or DEFAULT_BOARD_URL,
         board_name=os.environ.get("BOARD_NAME", DEFAULT_BOARD_NAME).strip() or DEFAULT_BOARD_NAME,
         state_file=os.environ.get("STATE_FILE", DEFAULT_STATE_FILE).strip() or DEFAULT_STATE_FILE,

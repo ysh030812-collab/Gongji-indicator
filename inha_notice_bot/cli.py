@@ -85,6 +85,10 @@ def _setup_logging(verbose: bool) -> None:
         format="%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    # urllib3 는 DEBUG 로 요청 URL을 통째로 찍는데, 텔레그램 API 주소에는
+    # 봇 토큰이 들어 있다. -v 로 돌린 로그(특히 CI 로그)에 토큰이 남지 않도록 막는다.
+    for noisy in ("urllib3", "requests", "charset_normalizer"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 def cmd_list(config: Config, send_to_telegram: bool = False) -> int:
