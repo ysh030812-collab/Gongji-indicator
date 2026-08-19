@@ -57,6 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="목록을 텔레그램으로도 보낸다 (PC 없이 휴대폰에서 확인할 때).",
     )
     sub.add_parser("test", parents=[common], help="텔레그램 설정 확인 후 테스트 메시지 전송")
+    sub.add_parser(
+        "chats",
+        parents=[common],
+        help="봇에게 말을 건 채팅들의 ID를 찾아준다 (chat not found 해결용)",
+    )
     return parser
 
 
@@ -80,6 +85,13 @@ def _apply_overrides(config: Config, args: argparse.Namespace) -> Config:
 
 
 def _setup_logging(verbose: bool) -> None:
+    # 파이프로 연결되면 stdout 이 통째로 버퍼링돼, stderr 로 나가는 오류 메시지가
+    # 출력 한가운데 끼어 보인다(CI 로그에서 특히 헷갈린다). 줄 단위로 내보낸다.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(line_buffering=True)
+
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
@@ -112,7 +124,13 @@ def cmd_list(config: Config, send_to_telegram: bool = False) -> int:
 
     if send_to_telegram:
         notifier = TelegramNotifier(config.bot_token, config.chat_id, timeout=config.timeout)
-        notifier.send_text(format_listing(result.notices, config.board_url))
+        try:
+            notifier.send_text(format_listing(result.notices, config.board_url))
+        except TelegramError as exc:
+            print(f"오류: {exc}", file=sys.stderr)
+            if "찾을 수 없" in str(exc):
+                _suggest_chat_ids(config)
+            return 1
         print(f"\n목록을 chat_id={config.chat_id} 로 보냈습니다.")
     return 0
 
@@ -128,6 +146,49 @@ def _try_report_failure(config: Config, message: str) -> None:
         print(f"(실패 내용을 텔레그램으로 보내지도 못했습니다: {exc})", file=sys.stderr)
 
 
+def cmd_chats(config: Config) -> int:
+    """봇이 받은 대화 목록을 보여준다. chat_id 를 확인할 때 쓴다."""
+    notifier = TelegramNotifier(config.bot_token, config.chat_id or "0", timeout=config.timeout)
+    chats = notifier.discover_chats()
+    if not chats:
+        print(
+            "봇이 받은 메시지가 없습니다.\n"
+            "  1) 텔레그램에서 봇 대화방을 열고 /start 또는 아무 메시지나 보내세요.\n"
+            "     (그룹이라면 봇을 초대한 뒤 그룹에 아무 메시지나 쓰세요)\n"
+            "  2) 그 직후에 이 명령을 다시 실행하세요.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print("봇에게 말을 건 채팅 목록입니다. 아래 ID 를 TELEGRAM_CHAT_ID 에 넣으세요.\n")
+    for chat in chats:
+        label = chat["name"] or "(이름 없음)"
+        kind = {"private": "개인", "group": "그룹", "supergroup": "그룹", "channel": "채널"}.get(
+            chat["type"], chat["type"]
+        )
+        print(f"  TELEGRAM_CHAT_ID = {chat['id']}    ← {kind} · {label}")
+    return 0
+
+
+def _suggest_chat_ids(config: Config) -> None:
+    """전송이 'chat not found' 로 실패했을 때 올바른 ID 후보를 알려준다."""
+    try:
+        notifier = TelegramNotifier(config.bot_token, config.chat_id or "0", timeout=config.timeout)
+        chats = notifier.discover_chats()
+    except TelegramError:
+        return
+    if not chats:
+        print(
+            "\n힌트: 봇 대화방에서 /start 를 누른 뒤 'chats' 명령을 실행하면 "
+            "올바른 채팅 ID를 찾아드립니다.",
+            file=sys.stderr,
+        )
+        return
+    print("\n힌트: 봇이 실제로 받은 대화의 ID 는 다음과 같습니다.", file=sys.stderr)
+    for chat in chats:
+        print(f"  {chat['id']}  ({chat['type']} · {chat['name'] or '이름 없음'})", file=sys.stderr)
+
+
 def cmd_test(config: Config) -> int:
     """토큰/채팅 ID가 맞는지 확인하고 테스트 메시지를 보낸다."""
     try:
@@ -141,6 +202,8 @@ def cmd_test(config: Config) -> int:
         print(f"테스트 메시지를 chat_id={config.chat_id} 로 보냈습니다.")
     except TelegramError as exc:
         print(f"오류: {exc}", file=sys.stderr)
+        if "찾을 수 없" in str(exc):
+            _suggest_chat_ids(config)
         return 1
     return 0
 
@@ -174,6 +237,9 @@ def main(argv: list[str] | None = None) -> int:
         if command == "list":
             # 그냥 출력만 할 때는 토큰이 없어도 동작하게 한다.
             config.dry_run = not getattr(args, "telegram", False)
+        if command == "chats":
+            # 찾으려는 대상이 chat_id 이므로 chat_id 검사는 건너뛴다.
+            config.chat_id = config.chat_id or "0"
         config.validate()
     except ConfigError as exc:
         print(f"설정 오류: {exc}", file=sys.stderr)
@@ -184,6 +250,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_list(config, send_to_telegram=getattr(args, "telegram", False))
         if command == "test":
             return cmd_test(config)
+        if command == "chats":
+            return cmd_chats(config)
         if command == "once":
             return cmd_once(config)
 

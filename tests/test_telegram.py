@@ -84,9 +84,19 @@ def test_client_error_is_not_retried():
         [FakeResponse(400, {"ok": False, "description": "chat not found"})]
     )
     notifier = TelegramNotifier(VALID_TOKEN, "12345", session=session, max_retries=3)
-    with pytest.raises(TelegramError, match="chat not found"):
+    # 400 은 설정 문제라 재시도해도 결과가 같다.
+    with pytest.raises(TelegramError):
         notifier.send_text("안녕")
     assert len(session.calls) == 1
+
+
+def test_chat_not_found_explains_how_to_fix_it():
+    session = FakeSession(
+        [FakeResponse(400, {"ok": False, "description": "Bad Request: chat not found"})]
+    )
+    notifier = TelegramNotifier(VALID_TOKEN, "12345", session=session)
+    with pytest.raises(TelegramError, match="TELEGRAM_CHAT_ID"):
+        notifier.send_text("안녕")
 
 
 def test_server_error_is_retried_then_succeeds(monkeypatch):
@@ -222,3 +232,63 @@ def test_warning_logs_hide_token(caplog):
         with pytest.raises(TelegramError):
             notifier.send_text("안녕")
     assert "AAEsecretValueThatMustNotLeak" not in caplog.text
+
+
+
+# --- 채팅 ID 찾아주기 -----------------------------------------------------
+# 'chat not found' 를 손으로 추적하기 어려워, 봇이 받은 대화를 직접 보여준다.
+
+class FakeGetSession:
+    def __init__(self, payload, status=200):
+        self.payload = payload
+        self.status = status
+        self.calls = []
+
+    def get(self, url, params=None, timeout=None):
+        self.calls.append((url, params))
+        return FakeResponse(self.status, self.payload)
+
+
+def test_discover_chats_lists_private_and_group_chats():
+    session = FakeGetSession(
+        {
+            "ok": True,
+            "result": [
+                {"message": {"chat": {"id": 987654321, "type": "private", "first_name": "서현"}}},
+                {"message": {"chat": {"id": -1001234567890, "type": "supergroup", "title": "의대 공지방"}}},
+            ],
+        }
+    )
+    chats = TelegramNotifier(VALID_TOKEN, "0", session=session).discover_chats()
+
+    assert {c["id"] for c in chats} == {"987654321", "-1001234567890"}
+    assert {c["name"] for c in chats} == {"서현", "의대 공지방"}
+
+
+def test_discover_chats_deduplicates_repeated_messages():
+    session = FakeGetSession(
+        {
+            "ok": True,
+            "result": [
+                {"message": {"chat": {"id": 111, "type": "private", "first_name": "가"}}},
+                {"message": {"chat": {"id": 111, "type": "private", "first_name": "가"}}},
+                {"edited_message": {"chat": {"id": 111, "type": "private", "first_name": "가"}}},
+            ],
+        }
+    )
+    assert len(TelegramNotifier(VALID_TOKEN, "0", session=session).discover_chats()) == 1
+
+
+def test_discover_chats_returns_empty_when_bot_got_no_messages():
+    session = FakeGetSession({"ok": True, "result": []})
+    assert TelegramNotifier(VALID_TOKEN, "0", session=session).discover_chats() == []
+
+
+def test_discover_chats_hides_token_on_error():
+    session = FakeGetSession(
+        {"ok": False, "description": f"bad token {SECRET_TOKEN}"}, status=401
+    )
+    notifier = TelegramNotifier(SECRET_TOKEN, "0", session=session)
+    with pytest.raises(TelegramError) as excinfo:
+        notifier.discover_chats()
+    assert "AAEsecretValueThatMustNotLeak" not in str(excinfo.value)

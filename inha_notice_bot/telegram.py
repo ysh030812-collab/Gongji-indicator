@@ -172,6 +172,11 @@ class TelegramNotifier:
                         "토큰에 공백이나 오타가 없는지, 토큰을 재발급(/revoke)한 뒤 "
                         "설정을 갱신했는지 확인하세요."
                     )
+                elif "chat not found" in str(description).lower():
+                    description = (
+                        "채팅을 찾을 수 없습니다. TELEGRAM_CHAT_ID 가 잘못됐을 가능성이 큽니다. "
+                        "봇 대화방에서 아무 메시지나 보낸 뒤 'chats' 명령으로 올바른 ID를 확인하세요."
+                    )
                 elif response.status_code == 403:
                     description = (
                         f"{description} — 봇 대화방에서 /start 를 눌렀는지, "
@@ -201,6 +206,48 @@ class TelegramNotifier:
 
     def send_notice(self, notice: Notice, board_name: str = "인하대 의과대학 공지") -> dict:
         return self.send_text(format_notice(notice, board_name))
+
+    def discover_chats(self) -> list[dict]:
+        """봇에게 말을 건 채팅들의 ID를 찾아준다(getUpdates).
+
+        chat_id 를 손으로 알아내는 과정에서 실수가 잦아, 봇이 실제로 받은
+        대화 목록을 직접 보여준다. 최근에 봇에게 보낸 메시지만 잡히므로
+        확인 직전에 봇에게 아무 메시지나 보내야 한다.
+        """
+        try:
+            response = self.session.get(
+                f"{self.api_base}/bot{self.token}/getUpdates",
+                params={"limit": 100},
+                timeout=self.timeout,
+            )
+        except requests.RequestException as exc:
+            raise TelegramError(
+                "텔레그램 API에 접속할 수 없습니다: " + self._redact(exc)
+            ) from exc
+
+        body = _json_or_none(response)
+        if not (response.ok and body and body.get("ok")):
+            raise TelegramError(
+                "대화 목록을 가져오지 못했습니다: "
+                + self._redact((body or {}).get("description", response.text[:200]))
+            )
+
+        chats: dict[str, dict] = {}
+        for update in body.get("result", []):
+            for key in ("message", "edited_message", "channel_post", "my_chat_member"):
+                chat = (update.get(key) or {}).get("chat")
+                if not chat:
+                    continue
+                chat_id = str(chat.get("id"))
+                name = chat.get("title") or " ".join(
+                    part for part in (chat.get("first_name"), chat.get("last_name")) if part
+                ) or chat.get("username") or ""
+                chats[chat_id] = {
+                    "id": chat_id,
+                    "type": chat.get("type", ""),
+                    "name": name,
+                }
+        return list(chats.values())
 
     def check_auth(self) -> str:
         """getMe 로 토큰이 유효한지 확인하고 봇 이름을 돌려준다."""

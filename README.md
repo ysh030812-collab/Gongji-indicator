@@ -75,6 +75,7 @@ python -m inha_notice_bot once             # 한 번만 확인하고 종료 (cro
 | `once` | 한 번만 확인하고 종료 — cron, GitHub Actions용 |
 | `list` | 현재 게시판 목록만 출력 (파싱 점검용). `--telegram` 을 붙이면 결과를 텔레그램으로도 보냄 |
 | `test` | 봇 토큰·채팅 ID 확인 후 테스트 메시지 발송 |
+| `chats` | 봇에게 말을 건 채팅들의 ID를 찾아준다 (`chat not found` 해결용) |
 
 | 옵션 | 환경변수 | 기본값 | 설명 |
 | --- | --- | --- | --- |
@@ -117,6 +118,8 @@ PC가 없어도 됩니다. 아래 과정은 전부 **텔레그램 앱 + 모바�
    (GitHub 모바일 **앱**에는 이 메뉴가 없습니다. Safari/Chrome로 `github.com` 에 접속하세요.)
 3. **Actions 탭 → 게시판 확인 (수동) → Run workflow** 를 눌러 파싱이 잘 되는지 확인합니다.
    현재 게시판에서 읽어낸 공지 목록이 텔레그램으로 옵니다.
+   - `chat not found` 가 나오면: 텔레그램에서 봇에게 아무 메시지나 보낸 뒤
+     **Actions → 채팅 ID 찾기 → Run workflow** 를 실행하세요. 올바른 ID를 알려줍니다.
 4. **Actions 탭 → 공지 확인 → Run workflow** 로 한 번 실행하면 이후 30분마다 자동으로 돕니다.
 
 > `.github/workflows/check-notices.yml` 이 30분마다 `once` 를 실행하고,
@@ -150,7 +153,8 @@ inha_notice_bot/
 
 .github/workflows/
 ├── check-notices.yml   30분마다 새 공지 확인 (자동)
-└── board-check.yml     게시판 파싱 점검 (수동 실행, 결과를 텔레그램으로)
+├── board-check.yml     게시판 파싱 점검 (수동 실행, 결과를 텔레그램으로)
+└── find-chat-id.yml    채팅 ID 찾기 (수동 실행)
 ```
 
 게시판 파싱은 인하대가 쓰는 CMS의 표 구조(`_artclTdTitle` 등)를 먼저 보고,
