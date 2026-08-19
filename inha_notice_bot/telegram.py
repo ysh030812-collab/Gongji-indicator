@@ -48,6 +48,35 @@ def format_notice(notice: Notice, board_name: str = "인하대 의과대학 공�
     return text
 
 
+def format_listing(notices: list[Notice], board_url: str, limit: int = 20) -> str:
+    """게시판 목록 전체를 한 통의 점검용 메시지로 만든다.
+
+    PC 없이 휴대폰만으로 파싱이 잘 되는지 확인할 때 쓴다.
+    """
+    header = f"🔎 <b>게시판 확인 결과</b>\n공지 {len(notices)}건을 읽었습니다.\n"
+    lines = [header]
+
+    for index, notice in enumerate(notices[:limit], start=1):
+        title = html.escape(notice.title)
+        mark = "📌 " if notice.pinned else ""
+        if notice.url:
+            entry = f'{index}. {mark}<a href="{html.escape(notice.url, quote=True)}">{title}</a>'
+        else:
+            entry = f"{index}. {mark}{title}"
+        if notice.date:
+            entry += f"  <i>({html.escape(notice.date)})</i>"
+        lines.append(entry)
+
+    if len(notices) > limit:
+        lines.append(f"\n… 외 {len(notices) - limit}건")
+    lines.append(f"\n{html.escape(board_url)}")
+
+    text = "\n".join(lines)
+    if len(text) > MAX_MESSAGE_LEN:
+        text = text[:_TRUNCATE_AT] + "\n…(생략)"
+    return text
+
+
 class TelegramNotifier:
     """봇 토큰과 채팅 ID를 들고 메시지를 보내는 클라이언트."""
 

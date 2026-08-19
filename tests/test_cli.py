@@ -65,10 +65,34 @@ def test_list_command_needs_no_telegram_credentials(monkeypatch):
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     called = {}
 
-    def fake_list(config):
+    def fake_list(config, send_to_telegram=False):
         called["url"] = config.board_url
+        called["telegram"] = send_to_telegram
         return 0
 
     monkeypatch.setattr("inha_notice_bot.cli.cmd_list", fake_list)
     assert main(["list", "--env-file", "", "--url", "https://example.com/b"]) == 0
     assert called["url"] == "https://example.com/b"
+    assert called["telegram"] is False
+
+
+def test_list_with_telegram_flag_requires_credentials(monkeypatch, capsys):
+    # --telegram 을 쓰면 전송을 해야 하므로 토큰 검사가 살아나야 한다.
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    assert main(["list", "--env-file", "", "--telegram"]) == 2
+    assert "TELEGRAM_BOT_TOKEN" in capsys.readouterr().err
+
+
+def test_list_passes_telegram_flag_through(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "T")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "C")
+    called = {}
+
+    def fake_list(config, send_to_telegram=False):
+        called["telegram"] = send_to_telegram
+        return 0
+
+    monkeypatch.setattr("inha_notice_bot.cli.cmd_list", fake_list)
+    assert main(["list", "--env-file", "", "--telegram"]) == 0
+    assert called["telegram"] is True

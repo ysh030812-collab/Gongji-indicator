@@ -5,7 +5,12 @@ import json
 import pytest
 
 from inha_notice_bot.models import Notice
-from inha_notice_bot.telegram import TelegramError, TelegramNotifier, format_notice
+from inha_notice_bot.telegram import (
+    TelegramError,
+    TelegramNotifier,
+    format_listing,
+    format_notice,
+)
 
 
 class FakeResponse:
@@ -98,3 +103,27 @@ def test_missing_credentials_rejected():
         TelegramNotifier("", "12345")
     with pytest.raises(TelegramError):
         TelegramNotifier("TOKEN", "")
+
+
+def test_format_listing_numbers_and_escapes_entries():
+    notices = [
+        Notice(uid="1", title="첫 번째 <공지>", url="https://x/1", date="2026.08.19", pinned=True),
+        Notice(uid="2", title="두 번째 공지", url="https://x/2", date="2026.08.18"),
+    ]
+    text = format_listing(notices, "https://x/board")
+    assert "공지 2건" in text
+    assert "1. 📌" in text
+    assert "&lt;공지&gt;" in text
+    assert "https://x/board" in text
+
+
+def test_format_listing_caps_entries_and_notes_remainder():
+    notices = [Notice(uid=str(i), title=f"공지 {i}") for i in range(30)]
+    text = format_listing(notices, "https://x/board", limit=5)
+    assert "외 25건" in text
+    assert len(text) <= 4096
+
+
+def test_format_listing_stays_within_message_limit():
+    notices = [Notice(uid=str(i), title="가" * 200, url=f"https://x/{i}") for i in range(50)]
+    assert len(format_listing(notices, "https://x/board")) <= 4096

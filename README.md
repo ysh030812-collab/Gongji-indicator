@@ -51,8 +51,9 @@ TELEGRAM_CHAT_ID=987654321
 먼저 설정이 맞는지 확인합니다.
 
 ```bash
-python -m inha_notice_bot test     # 텔레그램으로 테스트 메시지 발송
-python -m inha_notice_bot list     # 지금 게시판에 뭐가 보이는지 출력(전송 없음)
+python -m inha_notice_bot test              # 텔레그램으로 테스트 메시지 발송
+python -m inha_notice_bot list              # 지금 게시판에 뭐가 보이는지 출력
+python -m inha_notice_bot list --telegram   # 그 목록을 텔레그램으로도 받기
 ```
 
 그다음 감시를 시작합니다.
@@ -72,7 +73,7 @@ python -m inha_notice_bot once             # 한 번만 확인하고 종료 (cro
 | --- | --- |
 | `watch` | 주기적으로 확인 (기본값) |
 | `once` | 한 번만 확인하고 종료 — cron, GitHub Actions용 |
-| `list` | 현재 게시판 목록만 출력 (텔레그램 설정 없이도 동작) |
+| `list` | 현재 게시판 목록만 출력 (파싱 점검용). `--telegram` 을 붙이면 결과를 텔레그램으로도 보냄 |
 | `test` | 봇 토큰·채팅 ID 확인 후 테스트 메시지 발송 |
 
 | 옵션 | 환경변수 | 기본값 | 설명 |
@@ -106,12 +107,21 @@ sudo systemctl enable --now inha-notice-bot
 sudo journalctl -u inha-notice-bot -f
 ```
 
-### GitHub Actions (서버 없이)
+### GitHub Actions (서버 없이) — 휴대폰만으로도 가능
 
-`.github/workflows/check-notices.yml` 이 30분마다 `once` 를 실행합니다.
-저장소 **Settings → Secrets and variables → Actions** 에
-`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` 를 등록하면 바로 동작합니다.
-알림 기록은 Actions 캐시에 저장됩니다.
+PC가 없어도 됩니다. 아래 과정은 전부 **텔레그램 앱 + 모바일 브라우저**로 끝납니다.
+
+1. 텔레그램에서 봇을 만들고 채팅 ID를 확인합니다(위 2번 항목).
+2. 모바일 브라우저로 GitHub 저장소 → **Settings → Secrets and variables → Actions** 에서
+   `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` 두 개를 등록합니다.
+   (GitHub 모바일 **앱**에는 이 메뉴가 없습니다. Safari/Chrome로 `github.com` 에 접속하세요.)
+3. **Actions 탭 → 게시판 확인 (수동) → Run workflow** 를 눌러 파싱이 잘 되는지 확인합니다.
+   현재 게시판에서 읽어낸 공지 목록이 텔레그램으로 옵니다.
+4. **Actions 탭 → 공지 확인 → Run workflow** 로 한 번 실행하면 이후 30분마다 자동으로 돕니다.
+
+> `.github/workflows/check-notices.yml` 이 30분마다 `once` 를 실행하고,
+> 알림 기록은 Actions 캐시에 저장됩니다.
+> 예약 실행(cron)은 **저장소의 기본 브랜치에 있는 워크플로만** 동작합니다.
 
 > GitHub 무료 러너의 스케줄은 혼잡할 때 수십 분 밀릴 수 있습니다.
 > 정확한 주기가 필요하면 서버에서 `watch` 로 돌리세요.
@@ -137,6 +147,10 @@ inha_notice_bot/
 ├── telegram.py   텔레그램 전송 및 메시지 포맷
 ├── runner.py     한 번 확인 / 반복 실행 루프
 └── models.py     Notice 데이터 모델
+
+.github/workflows/
+├── check-notices.yml   30분마다 새 공지 확인 (자동)
+└── board-check.yml     게시판 파싱 점검 (수동 실행, 결과를 텔레그램으로)
 ```
 
 게시판 파싱은 인하대가 쓰는 CMS의 표 구조(`_artclTdTitle` 등)를 먼저 보고,

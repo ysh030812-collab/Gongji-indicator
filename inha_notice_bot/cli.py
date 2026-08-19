@@ -10,7 +10,7 @@ from . import __version__
 from .config import Config, ConfigError, load_config
 from .runner import check_once, run_forever
 from .scraper import ScrapeError, scrape
-from .telegram import TelegramError, TelegramNotifier
+from .telegram import TelegramError, TelegramNotifier, format_listing
 
 
 def _common_options(parser: argparse.ArgumentParser) -> None:
@@ -47,7 +47,15 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("once", parents=[common], help="한 번만 확인하고 종료 (cron/GitHub Actions용)")
     sub.add_parser("watch", parents=[common], help="주기적으로 계속 확인 (기본)")
-    sub.add_parser("list", parents=[common], help="현재 게시판 목록만 출력 (텔레그램 전송 없음)")
+    list_parser = sub.add_parser(
+        "list", parents=[common], help="현재 게시판 목록만 출력 (파싱 점검용)"
+    )
+    list_parser.add_argument(
+        "--telegram",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="목록을 텔레그램으로도 보낸다 (PC 없이 휴대폰에서 확인할 때).",
+    )
     sub.add_parser("test", parents=[common], help="텔레그램 설정 확인 후 테스트 메시지 전송")
     return parser
 
@@ -79,13 +87,16 @@ def _setup_logging(verbose: bool) -> None:
     )
 
 
-def cmd_list(config: Config) -> int:
+def cmd_list(config: Config, send_to_telegram: bool = False) -> int:
     """게시판 목록을 출력한다. 파싱이 잘 되는지 확인할 때 쓴다."""
     try:
         result = scrape(config.board_url, timeout=config.timeout)
     except ScrapeError as exc:
         print(f"오류: {exc}", file=sys.stderr)
+        if send_to_telegram:
+            _try_report_failure(config, str(exc))
         return 1
+
     print(f"{config.board_url} — 공지 {len(result)}건\n")
     for notice in result:
         mark = "[공지] " if notice.pinned else ""
@@ -94,7 +105,23 @@ def cmd_list(config: Config) -> int:
         print(f"    uid={notice.uid}  {meta}")
         if notice.url:
             print(f"    {notice.url}")
+
+    if send_to_telegram:
+        notifier = TelegramNotifier(config.bot_token, config.chat_id, timeout=config.timeout)
+        notifier.send_text(format_listing(result.notices, config.board_url))
+        print(f"\n목록을 chat_id={config.chat_id} 로 보냈습니다.")
     return 0
+
+
+def _try_report_failure(config: Config, message: str) -> None:
+    """파싱 실패도 텔레그램으로 알려준다(폰에서 확인할 수 있게)."""
+    try:
+        notifier = TelegramNotifier(config.bot_token, config.chat_id, timeout=config.timeout)
+        notifier.send_text(
+            "⚠️ <b>게시판 확인 실패</b>\n\n" + __import__("html").escape(message)
+        )
+    except TelegramError as exc:
+        print(f"(실패 내용을 텔레그램으로 보내지도 못했습니다: {exc})", file=sys.stderr)
 
 
 def cmd_test(config: Config) -> int:
@@ -141,7 +168,8 @@ def main(argv: list[str] | None = None) -> int:
         config = load_config(env_file)
         config = _apply_overrides(config, args)
         if command == "list":
-            config.dry_run = True   # list 는 토큰이 없어도 동작한다
+            # 그냥 출력만 할 때는 토큰이 없어도 동작하게 한다.
+            config.dry_run = not getattr(args, "telegram", False)
         config.validate()
     except ConfigError as exc:
         print(f"설정 오류: {exc}", file=sys.stderr)
@@ -149,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if command == "list":
-            return cmd_list(config)
+            return cmd_list(config, send_to_telegram=getattr(args, "telegram", False))
         if command == "test":
             return cmd_test(config)
         if command == "once":
