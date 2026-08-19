@@ -96,3 +96,72 @@ def test_list_passes_telegram_flag_through(monkeypatch):
     monkeypatch.setattr("inha_notice_bot.cli.cmd_list", fake_list)
     assert main(["list", "--env-file", "", "--telegram"]) == 0
     assert called["telegram"] is True
+
+
+# --- Actions 요약 페이지 출력 --------------------------------------------
+# 로그를 뒤지지 않아도(특히 휴대폰에서) 결과가 보이도록 요약에도 남긴다.
+
+def test_chats_writes_ids_to_step_summary(monkeypatch, tmp_path, capsys):
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+
+    class FakeNotifier:
+        def __init__(self, *a, **k):
+            pass
+
+        def discover_chats(self):
+            return [
+                {"id": "7937362217", "type": "private", "name": "혁 윤"},
+                {"id": "-1001234567890", "type": "supergroup", "name": "의대방"},
+            ]
+
+    monkeypatch.setattr("inha_notice_bot.cli.TelegramNotifier", FakeNotifier)
+    from inha_notice_bot.cli import cmd_chats
+    from inha_notice_bot.config import Config
+
+    assert cmd_chats(Config(bot_token="123:AAE", chat_id="")) == 0
+
+    written = summary.read_text(encoding="utf-8")
+    assert "7937362217" in written
+    assert "-1001234567890" in written
+    assert "TELEGRAM_CHAT_ID" in written
+    # 터미널 출력도 그대로 유지된다.
+    assert "7937362217" in capsys.readouterr().out
+
+
+def test_chats_summary_explains_empty_result(monkeypatch, tmp_path):
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+
+    class EmptyNotifier:
+        def __init__(self, *a, **k):
+            pass
+
+        def discover_chats(self):
+            return []
+
+    monkeypatch.setattr("inha_notice_bot.cli.TelegramNotifier", EmptyNotifier)
+    from inha_notice_bot.cli import cmd_chats
+    from inha_notice_bot.config import Config
+
+    assert cmd_chats(Config(bot_token="123:AAE", chat_id="")) == 1
+    assert "봇 대화방" in summary.read_text(encoding="utf-8")
+
+
+def test_summary_is_skipped_outside_actions(monkeypatch, capsys):
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+
+    class FakeNotifier:
+        def __init__(self, *a, **k):
+            pass
+
+        def discover_chats(self):
+            return [{"id": "1", "type": "private", "name": "가"}]
+
+    monkeypatch.setattr("inha_notice_bot.cli.TelegramNotifier", FakeNotifier)
+    from inha_notice_bot.cli import cmd_chats
+    from inha_notice_bot.config import Config
+
+    # 요약 파일이 없어도 그냥 동작해야 한다.
+    assert cmd_chats(Config(bot_token="123:AAE", chat_id="")) == 0
+    assert "TELEGRAM_CHAT_ID = 1" in capsys.readouterr().out

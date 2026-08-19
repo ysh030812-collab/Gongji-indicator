@@ -119,7 +119,8 @@ PC가 없어도 됩니다. 아래 과정은 전부 **텔레그램 앱 + 모바�
 3. **Actions 탭 → 게시판 확인 (수동) → Run workflow** 를 눌러 파싱이 잘 되는지 확인합니다.
    현재 게시판에서 읽어낸 공지 목록이 텔레그램으로 옵니다.
    - `chat not found` 가 나오면: 텔레그램에서 봇에게 아무 메시지나 보낸 뒤
-     **Actions → 채팅 ID 찾기 → Run workflow** 를 실행하세요. 올바른 ID를 알려줍니다.
+     **Actions → 채팅 ID 찾기 → Run workflow** 를 실행하세요.
+     실행 결과의 **Summary** 화면에 채팅 ID가 표로 나옵니다(로그를 열 필요 없음).
 4. **Actions 탭 → 공지 확인 → Run workflow** 로 한 번 실행하면 이후 30분마다 자동으로 돕니다.
 
 > `.github/workflows/check-notices.yml` 이 30분마다 `once` 를 실행하고,

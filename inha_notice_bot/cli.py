@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 
 from . import __version__
@@ -109,6 +110,7 @@ def cmd_list(config: Config, send_to_telegram: bool = False) -> int:
         result = scrape(config.board_url, timeout=config.timeout)
     except ScrapeError as exc:
         print(f"오류: {exc}", file=sys.stderr)
+        _write_step_summary(f"## ❌ 게시판 확인 실패\n\n```\n{exc}\n```\n")
         if send_to_telegram:
             _try_report_failure(config, str(exc))
         return 1
@@ -132,6 +134,12 @@ def cmd_list(config: Config, send_to_telegram: bool = False) -> int:
                 _suggest_chat_ids(config)
             return 1
         print(f"\n목록을 chat_id={config.chat_id} 로 보냈습니다.")
+
+    _write_step_summary(
+        f"## 게시판 확인 결과\n\n**공지 {len(result)}건**을 읽었습니다.\n\n"
+        + "\n".join(f"- {notice.title}" for notice in list(result)[:20])
+        + "\n"
+    )
     return 0
 
 
@@ -146,27 +154,60 @@ def _try_report_failure(config: Config, message: str) -> None:
         print(f"(실패 내용을 텔레그램으로 보내지도 못했습니다: {exc})", file=sys.stderr)
 
 
+def _write_step_summary(markdown: str) -> None:
+    """GitHub Actions 실행 요약 페이지에 결과를 남긴다.
+
+    로그를 뒤지지 않아도(특히 휴대폰에서) 결과가 바로 보이게 한다.
+    Actions 밖에서 실행하면 아무 일도 하지 않는다.
+    """
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(markdown + "\n")
+    except OSError:
+        pass   # 요약은 부가 기능이므로 실패해도 명령 자체는 계속된다
+
+
 def cmd_chats(config: Config) -> int:
     """봇이 받은 대화 목록을 보여준다. chat_id 를 확인할 때 쓴다."""
     notifier = TelegramNotifier(config.bot_token, config.chat_id or "0", timeout=config.timeout)
     chats = notifier.discover_chats()
     if not chats:
-        print(
+        message = (
             "봇이 받은 메시지가 없습니다.\n"
             "  1) 텔레그램에서 봇 대화방을 열고 /start 또는 아무 메시지나 보내세요.\n"
             "     (그룹이라면 봇을 초대한 뒤 그룹에 아무 메시지나 쓰세요)\n"
-            "  2) 그 직후에 이 명령을 다시 실행하세요.",
-            file=sys.stderr,
+            "  2) 그 직후에 이 명령을 다시 실행하세요."
+        )
+        print(message, file=sys.stderr)
+        _write_step_summary(
+            "## ❌ 채팅 ID를 찾지 못했습니다\n\n"
+            "봇이 최근에 받은 메시지가 없습니다.\n\n"
+            "1. 텔레그램에서 **봇 대화방을 열고 아무 메시지나 보내세요** "
+            "(그룹이라면 봇을 초대한 뒤 그룹에 메시지를 쓰세요)\n"
+            "2. 그 **직후에** 이 워크플로를 다시 실행하세요\n"
         )
         return 1
 
+    kinds = {"private": "개인", "group": "그룹", "supergroup": "그룹", "channel": "채널"}
     print("봇에게 말을 건 채팅 목록입니다. 아래 ID 를 TELEGRAM_CHAT_ID 에 넣으세요.\n")
+    rows = []
     for chat in chats:
         label = chat["name"] or "(이름 없음)"
-        kind = {"private": "개인", "group": "그룹", "supergroup": "그룹", "channel": "채널"}.get(
-            chat["type"], chat["type"]
-        )
+        kind = kinds.get(chat["type"], chat["type"])
         print(f"  TELEGRAM_CHAT_ID = {chat['id']}    ← {kind} · {label}")
+        rows.append(f"| `{chat['id']}` | {kind} | {label} |")
+
+    _write_step_summary(
+        "## 찾은 채팅 ID\n\n"
+        "아래 ID 를 저장소 **Settings → Secrets and variables → Actions** 의\n"
+        "`TELEGRAM_CHAT_ID` 에 넣으세요.\n\n"
+        "| TELEGRAM_CHAT_ID | 종류 | 이름 |\n|---|---|---|\n"
+        + "\n".join(rows)
+        + "\n"
+    )
     return 0
 
 
