@@ -27,7 +27,7 @@ class Config:
     state_file: str = DEFAULT_STATE_FILE
     interval: int = DEFAULT_INTERVAL
     max_per_run: int = DEFAULT_MAX_PER_RUN
-    timeout: float = 15.0
+    timeout: float = 20.0
     notify_first_run: bool = False
     dry_run: bool = False
 
@@ -104,6 +104,6 @@ def load_config(env_file: str | os.PathLike[str] | None = ".env") -> Config:
         state_file=os.environ.get("STATE_FILE", DEFAULT_STATE_FILE).strip() or DEFAULT_STATE_FILE,
         interval=_env_int("CHECK_INTERVAL", DEFAULT_INTERVAL),
         max_per_run=_env_int("MAX_PER_RUN", DEFAULT_MAX_PER_RUN),
-        timeout=float(os.environ.get("HTTP_TIMEOUT", "15") or 15),
+        timeout=float(os.environ.get("HTTP_TIMEOUT", "20") or 20),
         notify_first_run=_env_bool("NOTIFY_FIRST_RUN", False),
     )

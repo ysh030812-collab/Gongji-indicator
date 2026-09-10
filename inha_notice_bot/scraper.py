@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+import time
 from urllib.parse import parse_qs, urljoin, urlparse
 
 import requests
@@ -46,28 +47,66 @@ class ScrapeError(RuntimeError):
     """목록 페이지를 가져오거나 파싱하지 못했을 때."""
 
 
+def _is_retryable(exc: requests.RequestException) -> bool:
+    """다시 시도해볼 만한 오류인지 판단한다.
+
+    학교 서버가 가끔 느려져 읽기 시간이 초과된다. 이런 일시적인 문제는
+    잠시 뒤 다시 요청하면 대개 성공한다. 반면 404 같은 응답은 몇 번을
+    시도해도 결과가 같으므로 곧바로 포기한다.
+    """
+    if isinstance(exc, (requests.Timeout, requests.ConnectionError)):
+        return True
+    response = getattr(exc, "response", None)
+    return response is not None and response.status_code >= 500
+
+
 def fetch_html(
     url: str,
     *,
-    timeout: float = 15.0,
+    timeout: float = 20.0,
     session: requests.Session | None = None,
     user_agent: str = DEFAULT_USER_AGENT,
+    retries: int = 3,
+    sleep_func=time.sleep,
 ) -> str:
-    """목록 페이지 HTML을 문자열로 받아온다."""
+    """목록 페이지 HTML을 문자열로 받아온다.
+
+    일시적인 네트워크 오류는 점점 간격을 늘려가며 다시 시도한다.
+    """
     sess = session or requests.Session()
-    try:
-        response = sess.get(
-            url,
-            timeout=timeout,
-            headers={
-                "User-Agent": user_agent,
-                "Accept": "text/html,application/xhtml+xml",
-                "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
-            },
-        )
-        response.raise_for_status()
-    except requests.RequestException as exc:  # 네트워크/HTTP 오류
-        raise ScrapeError(f"목록 페이지를 가져오지 못했습니다: {url} ({exc})") from exc
+    attempts = max(1, retries)
+    last_error: requests.RequestException | None = None
+
+    for attempt in range(1, attempts + 1):
+        try:
+            response = sess.get(
+                url,
+                timeout=timeout,
+                headers={
+                    "User-Agent": user_agent,
+                    "Accept": "text/html,application/xhtml+xml",
+                    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+                },
+            )
+            response.raise_for_status()
+            break
+        except requests.RequestException as exc:   # 네트워크/HTTP 오류
+            last_error = exc
+            if attempt >= attempts or not _is_retryable(exc):
+                raise ScrapeError(
+                    f"목록 페이지를 가져오지 못했습니다: {url} ({exc})"
+                ) from exc
+            delay = 2 ** attempt
+            logger.warning(
+                "게시판 접속 실패 (%d/%d), %d초 후 다시 시도합니다: %s",
+                attempt,
+                attempts,
+                delay,
+                exc,
+            )
+            sleep_func(delay)
+    else:   # pragma: no cover - 위 루프는 성공하거나 예외를 던진다
+        raise ScrapeError(f"목록 페이지를 가져오지 못했습니다: {url} ({last_error})")
 
     # 이 CMS는 대개 UTF-8이지만 헤더에 charset이 없으면 requests가 ISO-8859-1로
     # 추측해 한글이 깨진다. 명시가 없을 때만 apparent_encoding을 쓴다.
@@ -251,11 +290,12 @@ def parse_notices(html: str, base_url: str = "") -> list[Notice]:
 def scrape(
     url: str,
     *,
-    timeout: float = 15.0,
+    timeout: float = 20.0,
     session: requests.Session | None = None,
+    retries: int = 3,
 ) -> ScrapeResult:
     """목록 페이지를 받아 파싱한 결과를 돌려준다."""
-    html = fetch_html(url, timeout=timeout, session=session)
+    html = fetch_html(url, timeout=timeout, session=session, retries=retries)
     notices = parse_notices(html, base_url=url)
     if not notices:
         raise ScrapeError(

@@ -74,3 +74,93 @@ def test_extract_uid_variants():
     assert extract_uid("?enc=AAA", "t").startswith("enc-")
     assert extract_uid("/some/other/page", "t").startswith("url-")
     assert extract_uid("", "제목") == extract_uid("", " 제목 ")
+
+
+# --- 일시적인 네트워크 오류 재시도 ---------------------------------------
+# 실제 운영에서 학교 서버 응답이 느려 read timeout 으로 실행이 실패했다.
+# 한 번의 시간 초과로 그 회차를 통째로 날리지 않도록 다시 시도한다.
+
+import pytest
+import requests
+
+from inha_notice_bot.scraper import ScrapeError, fetch_html
+
+
+class FakeResponse:
+    def __init__(self, text="<html></html>", status=200):
+        self.text = text
+        self.status_code = status
+        self.encoding = "utf-8"
+        self.headers = {"Content-Type": "text/html; charset=utf-8"}
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            error = requests.HTTPError(f"{self.status_code}")
+            error.response = self
+            raise error
+
+
+class ScriptedSession:
+    """미리 정해둔 순서대로 응답하거나 예외를 던지는 세션."""
+
+    def __init__(self, *outcomes):
+        self.outcomes = list(outcomes)
+        self.calls = 0
+
+    def get(self, url, timeout=None, headers=None):
+        self.calls += 1
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+def test_timeout_is_retried_then_succeeds():
+    session = ScriptedSession(
+        requests.Timeout("read timed out"),
+        FakeResponse("<html>ok</html>"),
+    )
+    html = fetch_html("https://x/board", session=session, sleep_func=lambda _s: None)
+
+    assert html == "<html>ok</html>"
+    assert session.calls == 2
+
+
+def test_connection_error_is_retried():
+    session = ScriptedSession(
+        requests.ConnectionError("reset"),
+        requests.ConnectionError("reset"),
+        FakeResponse("<html>ok</html>"),
+    )
+    fetch_html("https://x/board", session=session, sleep_func=lambda _s: None)
+    assert session.calls == 3
+
+
+def test_gives_up_after_all_retries():
+    session = ScriptedSession(*[requests.Timeout("t")] * 3)
+    with pytest.raises(ScrapeError, match="가져오지 못했습니다"):
+        fetch_html("https://x/board", session=session, retries=3, sleep_func=lambda _s: None)
+    assert session.calls == 3
+
+
+def test_server_error_is_retried():
+    session = ScriptedSession(FakeResponse(status=503), FakeResponse("<html>ok</html>"))
+    fetch_html("https://x/board", session=session, sleep_func=lambda _s: None)
+    assert session.calls == 2
+
+
+def test_not_found_is_not_retried():
+    # 404 는 몇 번을 시도해도 같으므로 곧바로 포기한다.
+    session = ScriptedSession(FakeResponse(status=404))
+    with pytest.raises(ScrapeError):
+        fetch_html("https://x/board", session=session, sleep_func=lambda _s: None)
+    assert session.calls == 1
+
+
+def test_retry_delays_grow():
+    delays = []
+    session = ScriptedSession(
+        requests.Timeout("t"), requests.Timeout("t"), FakeResponse("<html>ok</html>")
+    )
+    fetch_html("https://x/board", session=session, sleep_func=delays.append)
+    assert delays == [2, 4]
